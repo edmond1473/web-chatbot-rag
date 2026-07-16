@@ -1,0 +1,14 @@
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 环境变量 / 密钥
+.env
+*.key
+
+# 聊天历史 / 敏感数据
+history.json
+*.log
+
+# 系统文件
+.DS_Store

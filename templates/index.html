@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ask about Edmond</title>
+
+  <style>
+    /* ===================================================================
+       设计 token —— 颜色、字体、圆角都收在这里，要改风格只动这一块
+       =================================================================== */
+    :root {
+      --bg:          #ffffff;   /* 页面底色 */
+      --surface:     #f5f5f7;   /* bot 气泡 / 输入框底色（Apple 的那个浅灰）*/
+      --text:        #1d1d1f;   /* 主文字 */
+      --text-muted:  #86868b;   /* 次要文字 */
+      --accent:      #0071e3;   /* 用户气泡 + 按钮的蓝 */
+      --accent-dim:  #0077ed;   /* hover 时略亮一点 */
+      --border:      #e8e8ed;
+
+      --radius-bubble: 20px;
+      --radius-input:  22px;
+
+      /* 苹果系统字体栈：在 Mac / iPhone 上直接用 SF Pro，其他平台优雅降级 */
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+              "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;              /* dvh：手机上地址栏收起时高度也正确 */
+      display: flex;
+      justify-content: center;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* 整个 app 是一根居中的窄栏 —— 留白靠两侧的空来撑 */
+    .app {
+      width: 100%;
+      max-width: 720px;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    /* ===================================================================
+       顶栏 —— 半透明毛玻璃，滚动时内容从下面透过去
+       =================================================================== */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 24px;
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .title      { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+    .subtitle   { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    /* “新对话”按钮：平时几乎隐形，hover 才浮现 */
+    .reset-btn {
+      font: inherit;
+      font-size: 13px;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 14px;
+      cursor: pointer;
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+    .reset-btn:hover { background: var(--surface); color: var(--text); }
+    .reset-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ===================================================================
+       消息区
+       =================================================================== */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 32px 24px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    /* 气泡通用样式 */
+    .bubble {
+      max-width: 78%;
+      padding: 12px 17px;
+      border-radius: var(--radius-bubble);
+      font-size: 15px;
+      line-height: 1.55;
+      white-space: pre-wrap;        /* 保留模型回复里的换行 */
+      word-wrap: break-word;
+      animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1);  /* 淡入 + 轻微上移 */
+    }
+
+    /* 用户在右：蓝底白字 */
+    .bubble.user {
+      align-self: flex-end;
+      background: var(--accent);
+      color: #fff;
+      border-bottom-right-radius: 6px;   /* 缺一角，指向发送者 */
+    }
+
+    /* bot 在左：浅灰底 */
+    .bubble.bot {
+      align-self: flex-start;
+      background: var(--surface);
+      color: var(--text);
+      border-bottom-left-radius: 6px;
+    }
+
+    /* 出错时的气泡：柔和的红，不刺眼 */
+    .bubble.error {
+      align-self: flex-start;
+      background: #fff2f2;
+      color: #c0392b;
+      border-bottom-left-radius: 6px;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* --- bot 正在生成时的三点跳动 --- */
+    .typing {
+      align-self: flex-start;
+      background: var(--surface);
+      border-radius: var(--radius-bubble);
+      border-bottom-left-radius: 6px;
+      padding: 16px 18px;
+      display: flex;
+      gap: 5px;
+      animation: rise 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .typing span {
+      width: 7px; height: 7px;
+      background: #b8b8bd;
+      border-radius: 50%;
+      animation: blink 1.3s infinite ease-in-out;
+    }
+    .typing span:nth-child(2) { animation-delay: 0.18s; }
+    .typing span:nth-child(3) { animation-delay: 0.36s; }
+
+    @keyframes blink {
+      0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+      30%           { opacity: 1;   transform: translateY(-3px); }
+    }
+
+    /* ===================================================================
+       首屏欢迎区 —— 发出第一条消息后整块移除
+       =================================================================== */
+    .welcome {
+      margin: auto 0;
+      text-align: center;
+      padding: 24px 0 40px;
+      animation: rise 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .welcome h1 {
+      font-size: 30px;
+      font-weight: 600;
+      letter-spacing: -0.022em;
+    }
+    .welcome p {
+      color: var(--text-muted);
+      font-size: 15px;
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+
+    /* 建议问题：点一下直接发送，降低访客开口的门槛 */
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 28px;
+    }
+    .chip {
+      font: inherit;
+      font-size: 13.5px;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      padding: 9px 15px;
+      border-radius: 18px;
+      cursor: pointer;
+      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    }
+    .chip:hover {
+      background: var(--surface);
+      border-color: #d2d2d7;
+      transform: translateY(-1px);
+    }
+    .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ===================================================================
+       输入区
+       =================================================================== */
+    .composer {
+      padding: 16px 24px 24px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      background: var(--bg);
+    }
+
+    #input {
+      flex: 1;
+      font: inherit;
+      font-size: 15px;
+      line-height: 1.5;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid transparent;
+      border-radius: var(--radius-input);
+      padding: 12px 18px;
+      resize: none;                /* 禁止手动拖大，高度由 JS 自适应 */
+      max-height: 140px;
+      outline: none;
+      transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    }
+    #input::placeholder { color: var(--text-muted); }
+    /* focus：边框高亮 + 一圈柔和光晕 */
+    #input:focus {
+      background: var(--bg);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
+    }
+
+    #send {
+      flex-shrink: 0;
+      width: 44px; height: 44px;
+      border: none;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: background 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+    }
+    #send:hover:not(:disabled)  { background: var(--accent-dim); transform: scale(1.05); }
+    #send:active:not(:disabled) { transform: scale(0.95); }
+    #send:disabled              { opacity: 0.35; cursor: default; }  /* 空输入 / 生成中 */
+    #send:focus-visible         { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .hint {
+      text-align: center;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      padding-bottom: 16px;
+    }
+
+    /* 手机适配 */
+    @media (max-width: 600px) {
+      .messages   { padding: 24px 16px 8px; }
+      .composer   { padding: 12px 16px 16px; }
+      .welcome h1 { font-size: 25px; }
+      .bubble     { max-width: 86%; }
+    }
+
+    /* 尊重系统的“减少动态效果”设置 */
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+
+    <header>
+      <div>
+        <div class="title">Edmond 的网站助理</div>
+        <div class="subtitle">问我关于 Edmond 的任何事</div>
+      </div>
+      <button class="reset-btn" id="reset">新对话</button>
+    </header>
+
+    <!-- 消息区。首屏先放欢迎语，发出第一条消息后被 JS 移除 -->
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <h1>你好 👋</h1>
+        <p>我是 Edmond 的网站助理。<br>他的教育背景、技术技能、项目和经历，都可以问我。</p>
+        <div class="chips">
+          <button class="chip">他做过什么项目？</button>
+          <button class="chip">他的技术栈是什么？</button>
+          <button class="chip">怎么联系他？</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 输入区 -->
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="问点什么…" autocomplete="off"></textarea>
+      <button id="send" disabled aria-label="发送">
+        <!-- 向上的箭头，纯 SVG，不依赖图标库 -->
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="19" x2="12" y2="5"></line>
+          <polyline points="5 12 12 5 19 12"></polyline>
+        </svg>
+      </button>
+    </div>
+
+    <div class="hint">回答基于 Edmond 的简历生成，可能不完整。</div>
+
+  </div>
+
+  <script>
+    // =====================================================================
+    // 注意：这里没有任何 API key。
+    // 前端只跟自己的 Flask 后端 (/chat) 说话，由后端拿着 key 去调 DeepSeek。
+    // =====================================================================
+
+    const messagesEl = document.getElementById('messages');
+    const welcomeEl  = document.getElementById('welcome');
+    const inputEl    = document.getElementById('input');
+    const sendBtn    = document.getElementById('send');
+    const resetBtn   = document.getElementById('reset');
+
+    let isWaiting = false;   // 正在等后端回复时，锁住发送，防止连点
+
+    // --- 往消息区加一个气泡 ---
+    function addBubble(text, role) {   // role: 'user' | 'bot' | 'error'
+      const el = document.createElement('div');
+      el.className = `bubble ${role}`;
+      el.textContent = text;           // 用 textContent 而不是 innerHTML —— 防 XSS
+      messagesEl.appendChild(el);
+      scrollToBottom();
+    }
+
+    // --- bot 生成中的三点动画，返回这个元素以便之后删掉 ---
+    function addTyping() {
+      const el = document.createElement('div');
+      el.className = 'typing';
+      el.innerHTML = '<span></span><span></span><span></span>';
+      messagesEl.appendChild(el);
+      scrollToBottom();
+      return el;
+    }
+
+    function scrollToBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // --- 核心：发送一条消息 ---
+    async function send(text) {
+      if (isWaiting) return;
+      text = text.trim();
+      if (!text) return;
+
+      // 第一条消息发出后，欢迎区就该退场了
+      if (welcomeEl && welcomeEl.parentNode) welcomeEl.remove();
+
+      addBubble(text, 'user');
+
+      // 清空并复位输入框
+      inputEl.value = '';
+      autoGrow();
+      setWaiting(true);
+
+      const typing = addTyping();
+
+      try {
+        const res = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text })
+        });
+        const data = await res.json();
+
+        typing.remove();
+
+        if (!res.ok) {
+          // 后端返回的友善错误（比如 API 挂了、消息太长）
+          addBubble(data.error || '出了点问题，请再试一次。', 'error');
+        } else {
+          addBubble(data.reply, 'bot');
+        }
+      } catch (err) {
+        // 网络断了 / 后端没在跑
+        typing.remove();
+        addBubble('连不上服务器，请检查网络后重试。', 'error');
+      } finally {
+        setWaiting(false);
+      }
+    }
+
+    // --- 等待状态：锁住输入和按钮 ---
+    function setWaiting(waiting) {
+      isWaiting = waiting;
+      sendBtn.disabled = waiting || !inputEl.value.trim();
+      if (!waiting) inputEl.focus();
+    }
+
+    // --- 输入框高度随内容自适应（最多 140px，超了就内部滚动）---
+    function autoGrow() {
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
+    }
+
+    // --- 事件绑定 ---
+    inputEl.addEventListener('input', () => {
+      autoGrow();
+      sendBtn.disabled = isWaiting || !inputEl.value.trim();   // 空输入时按钮变灰
+    });
+
+    // Enter 发送，Shift+Enter 换行
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send(inputEl.value);
+      }
+    });
+
+    sendBtn.addEventListener('click', () => send(inputEl.value));
+
+    // 建议 chip：点一下直接发送
+    document.querySelectorAll('.chip').forEach(chip => {
+      chip.addEventListener('click', () => send(chip.textContent));
+    });
+
+    // “新对话”：清掉后端 session 里的历史，再刷新页面回到首屏
+    resetBtn.addEventListener('click', async () => {
+      await fetch('/reset', { method: 'POST' });
+      location.reload();
+    });
+
+    inputEl.focus();
+  </script>
+</body>
+</html>
