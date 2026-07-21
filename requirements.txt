@@ -1,2 +1,4 @@
-flask
-anthropic
+flask==3.1.3
+flask-cors==6.0.5
+gunicorn==26.0.0
+anthropic==0.116.0
